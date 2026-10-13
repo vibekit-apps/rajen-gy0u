@@ -37,15 +37,39 @@ const MIME = {
 const routes = {
   'GET /health': (req, res) => json(res, { status: 'ok', uptime: process.uptime(), release: currentRelease() }),
 
-  // Example data. Replace with your app's own.
-  'GET /api/items': (req, res) => json(res, store.read('items')),
-  'POST /api/items': async (req, res) => {
-    const { text } = await readBody(req);
-    if (!text || !String(text).trim()) return json(res, { error: 'Write something first' }, 400);
-    const item = { id: crypto.randomUUID(), text: String(text).trim().slice(0, 500), createdAt: new Date().toISOString() };
-    store.write('items', [item, ...store.read('items')]);
-    json(res, item, 201);
+  'GET /api/conversations': (req, res) => json(res, store.read('conversations').map(({ messages, ...item }) => ({ ...item, preview: messages[messages.length - 1]?.content || '' }))),
+  'GET /api/conversations/:id': (req, res) => json(res, { error: 'Not found' }, 404),
+  'POST /api/chat': async (req, res) => {
+    const { message, conversationId } = await readBody(req);
+    const text = String(message || '').trim().slice(0, 2000);
+    if (!text) return json(res, { error: 'Ask Rajen something first.' }, 400);
+    if (!process.env.VIBEKIT_AI_URL || !process.env.VIBEKIT_AI_TOKEN) return json(res, { error: 'Rajen AI is getting ready. Please try again shortly.' }, 503);
+    const conversations = store.read('conversations');
+    let conversation = conversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      conversation = { id: crypto.randomUUID(), title: text.slice(0, 52), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), messages: [] };
+      conversations.unshift(conversation);
+    }
+    conversation.messages.push({ role: 'user', content: text });
+    try {
+      const ai = await fetch(process.env.VIBEKIT_AI_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.VIBEKIT_AI_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [
+          { role: 'system', content: 'You are Rajen, a focused GPSC preparation assistant. Give accurate, concise answers and clear step-by-step study guidance. If a fact is uncertain or time-sensitive, say so. Use simple language and helpful headings.' },
+          ...conversation.messages.map(({ role, content }) => ({ role, content })),
+        ] }),
+      });
+      const result = await ai.json();
+      if (!ai.ok) return json(res, { error: result.error || 'Rajen could not answer right now.' }, ai.status);
+      const answer = String(result.text || '').trim() || 'I could not generate an answer. Please try again.';
+      conversation.messages.push({ role: 'assistant', content: answer });
+      conversation.updatedAt = new Date().toISOString();
+      store.write('conversations', conversations.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
+      json(res, { conversation, answer });
+    } catch (error) { json(res, { error: 'Rajen could not connect right now. Please try again.' }, 502); }
   },
+  'POST /api/history/clear': (req, res) => { store.write('conversations', []); json(res, { ok: true }); },
 
   // Accounts (lib/auth.js). The app keeps the returned token (lib/api.ts).
   'POST /api/auth/signup': async (req, res) => {

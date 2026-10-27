@@ -1,17 +1,16 @@
 # TOOLS.md — rajen-gy0u
 
-> Only the part of this file ABOVE the "INJECTED CONTEXT ENDS" marker reaches
-> your context automatically. Everything below it is on disk in this same file
-> and documents real APIs you have. **Run `cat TOOLS.md` before calling any
+> Only the part ABOVE the "INJECTED CONTEXT ENDS" marker reaches your context;
+> everything below is on disk in this file and documents real APIs you have.
+> **Run `cat TOOLS.md` before calling any
 > API whose payload is not shown above — never improvise an endpoint, field, or
 > slug.** The index below tells you when to reach for each one.
 
 ## What you have
-- Shell: node, npm, git, curl (sandboxed — no docker/aws/ssh). Only the workspace outlives a command: global installs, agent skills, MCP servers and CLI logins vanish at exit, so a vendor's "set up your agent" installer never takes here, whatever it prints. Use its API with a key in §Environment.
-- File read/write on your workspace (which IS the live app code)
-- web_fetch (a URL you already have), sub-agents, image analysis
-- VibeKit API via the preset `VIBEKIT_*` env vars (see AGENTS.md for endpoints)
-- Web search when the route offers it; `web_fetch` retrieves a URL you already have. Never invent an address, price or phone number: ask.
+- Shell: node, npm, git, curl (sandboxed — no docker/aws/ssh). Only the workspace outlives a command: global installs, agent skills, MCP servers and CLI logins vanish at exit, so a vendor's agent installer never takes, whatever it prints. Use its API with a key in §Environment.
+- File read/write on your workspace (which IS the live app code), sub-agents, image analysis
+- VibeKit API via the preset `VIBEKIT_*` env vars (endpoints: AGENTS.md)
+- `web_search`: ONE AI answer with sources, billed; `web_fetch` reads a URL you have → §Web search. Never invent an address, price or phone number: ask.
 
 ## Rules that must never wait for a file read
 - **Nothing runs between turns.** Never promise timed or later work ("every 15
@@ -524,7 +523,7 @@ zip the workspace (it holds the app's data and .env), never ask for a GitHub tok
 
 ## Environment — runtime secrets and app passwords
 The deployed app's runtime env is PORT, NODE_ENV, DATABASE_URL plus whatever is
-in the app's Environment. **Environment variables**: in VibeKit, not the built app. iOS — tap the app name atop the chat, then **Environment**; web — the app's **Settings** tab. Anything the APP needs at
+in the app's Environment. **Environment variables**: in VibeKit, not the built app. iOS — tap the workspace name atop the chat, then **Environment**; web — the workspace's **Settings** tab. Anything the APP needs at
 runtime — a staff password, a PIN, a third-party API key — belongs there, read
 as `process.env.NAME`. The OWNER's own admin access is never a password: it
 is the owner link (§Sign in with Google).
@@ -570,7 +569,7 @@ curl -s -X PUT "$VIBEKIT_API_URL/api/v1/hosting/app/$VIBEKIT_APP_ID/env" \
 The app the user asked you to build can call real AI itself — a chatbot, a
 recommender, a summarizer — WITHOUT the user buying an OpenAI plan or pasting
 any key. The platform serves it and bills the owner's VibeKit credits
-(cost x markup, capped per day); at $0 balance it degrades to the free model
+(cost x markup, capped per day); out of credits, it degrades to the free model
 pool instead of dying. Never tell a user their app needs "OpenAI API billing"
 — wire it to this instead.
 
@@ -598,7 +597,7 @@ base64 PNG/JPEG/WebP/GIF data URL or an https URL (up to 4 pictures,
 (web: a canvas, or public/shrink-photo.js if the app has it; Expo: expo-image-manipulator from the deps action, then lib/shrink-photo.ts if present). Pictures out: POST `VIBEKIT_AI_URL + '/image'` with the same
 headers and `{ prompt, aspect_ratio?, image? }` (`image`: a data URL to edit)
 → `{ image: "data:image/png;base64,…", mime, model }`, ready for `<img src>`.
-Pictures bill the owner's credits and need a balance above $0 (402 otherwise;
+Pictures bill the owner's credits and need credits above $0 (402 otherwise;
 text keeps working). No tools.
 
 Voice, for an app that listens or talks (push to talk), same headers:
@@ -711,7 +710,7 @@ curl -s "$VIBEKIT_API_URL/api/v1/hosting/app/$VIBEKIT_APP_ID/agent/capabilities"
 ```
 
 ## Location — where the user is
-Their timezone, locale, language and country.
+Their timezone, locale, language and country, and where their phone is if they chose to share it.
 
 **On dates and times, read this once.** The `Current date` in your system
 prompt is the platform host's clock, and that host runs UTC — it is NOT where
@@ -723,22 +722,36 @@ Americas the UTC date is a day ahead of them for much of their evening.
 
 You therefore do NOT need this endpoint to answer "what time is it". Fetch it
 when the answer genuinely depends on WHERE they are: local businesses, regional
-pricing or availability, units and date formats, public holidays, "near me".
+pricing or availability, units and date formats, public holidays, weather,
+directions, "near me".
 
 ```bash
 curl -s "$VIBEKIT_API_URL/api/v1/hosting/app/$VIBEKIT_APP_ID/agent/user-context" \
   -H "Authorization: Bearer $VIBEKIT_API_KEY"
 # → { "timezone":"America/Los_Angeles", "localTime":"Mon 4 Aug 2026, 05:53",
 #     "utcOffset":"UTC-7", "locale":"en-US", "language":"en", "country":"US",
-#     "source":"reported by the user's device (timezone + locale). No GPS…" }
+#     "source":"timezone, locale and country are reported by…",
+#     "location": { "lat":32.716, "lon":-117.161, "accuracyM":100,
+#                   "place":"Gaslamp Quarter, San Diego", "capturedAt":"…",
+#                   "ageSeconds":540, "stale":false },
+#     "locationUnavailable": null }
 ```
 
-- **This is a country, never an address.** `country` is inferred from their
-  locale, and we hold no GPS fix and do no IP lookup. Never imply you know their
-  city, neighbourhood or street, and never present the inference as certainty.
-- Any field can be `null` — we only know what their device has reported. If
-  the answer needs a location you do not have, ask them one short question
-  instead of guessing.
+- **`location`** is where the owner's phone last was, if they chose to share
+  it: rounded to ~100 m, with its age. Say how old it is when that matters,
+  treat `stale:true` (over a day) as a hint, and never read coordinates back
+  unprompted: use the place, or just the answer.
+- **When it is null**, `locationUnavailable` says why: `off` (not shared,
+  the usual case), `no_fix`, `denied` (phone permission off), `shared`
+  (this workspace has collaborators, so it is never given here) or
+  `owner_only`. If the answer needs a location, ask one short question; never
+  imply you know their city from `country`, which comes from their locale.
+- **Fresher**, only when freshness changes the answer (never in a loop):
+  `curl -s -X POST "$VIBEKIT_API_URL/api/v1/hosting/app/$VIBEKIT_APP_ID/agent/location/refresh" -H "Authorization: Bearer $VIBEKIT_API_KEY"`
+  → `{ location, fresh, reason }`. `fresh:false` is the last known fix;
+  relay `reason` (`while_using_only`: their phone shares only while the
+  app is open).
+- Any field can be `null`: we only know what their device has reported.
 
 ## UI labels (a screen in another language)
 When the turn's line says the iOS app is shown in a language other than
@@ -818,6 +831,21 @@ curl -s -X POST "$VIBEKIT_API_URL/api/v1/hosting/app/$VIBEKIT_APP_ID/schedules" 
   here and sent to them as a notification.
 - Confirm in one plain line, no cron, ids or UTC. `GET` the same URL lists
   them; `PATCH …/schedules/<id>` with `{"enabled":false}` pauses; `DELETE` removes.
+
+## Web search (one answer, not a result list)
+- `web_search` asks Perplexity and returns ONE AI-written answer plus the URLs
+  it cited, never a list of results. `count` does nothing; `freshness` works.
+  An uncached search uses credits under the model-call credit gate.
+- Ask a full question ("What does X cost in the US in 2026?"), not keywords.
+  Before you rely on a figure (price, date, address, score), `web_fetch` a
+  cited URL and check it there.
+- Raw search results, Google Trends, SEO or stats (sports, markets): the
+  `vibekit_paid_tools` tool (§Paid tools), not more searches.
+- `web_fetch` reads a URL you already have. A site that blocks it is retried
+  once through VibeKit's fetcher, on the owner's own Anthropic key if they
+  connected one, else on their credits (the result says what it cost; the free
+  model route without a connected provider is refused). An error after that is final: do not fetch that URL again;
+  try `vibekit_paid_tools` or tell the user.
 
 ## Paid tools — Instant
 
@@ -928,7 +956,7 @@ has the full layout.
 curl -s -X POST "$VIBEKIT_API_URL/api/v1/hosting/app/$VIBEKIT_APP_ID/deps" \
   -H "Authorization: Bearer $VIBEKIT_API_KEY" -H 'Content-Type: application/json' \
   -d '{"add":["expo-haptics"]}'
-# → { "added": { "expo-haptics": "~57.0.3" }, "unchanged": [], "message": "Added … The publish after your reply builds it into the app." }
+# → { "added": { "expo-haptics": "~58.0.7" }, "unchanged": [], "message": "Added … The publish after your reply builds it into the app." }
 # 400 { "error": "not_allowed", "allowed": [ … ] }: Expo Go cannot run it. Use one
 #   from `allowed` or build the feature without it, and say which part waits.
 ```
@@ -990,7 +1018,7 @@ relaying a dead end.
 P=$VIBEKIT_TEST_PORT; PORT=$P node server.js > /tmp/boot.log 2>&1 & S=$!
 up=; for i in 1 2 3 4 5; do sleep 1; curl -sf -o /dev/null localhost:$P && { up=1; echo "boot OK"; break; }; done
 kill $S 2>/dev/null
-[ -z "$up" ] && { echo "--- boot FAILED, real error: ---"; tail -40 /tmp/boot.log; }
+[ -n "$up" ] || { echo "--- boot FAILED ---"; tail -40 /tmp/boot.log; false; }
 ```
 
 If the log shows the error, FIX it before you report back — never hand the user
